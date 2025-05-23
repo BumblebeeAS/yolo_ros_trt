@@ -7,7 +7,6 @@ from geometry_msgs.msg import Point
 from std_msgs.msg import ColorRGBA, Header
 from ultralytics.engine.results import Boxes, Keypoints, Masks, Results
 from visualization_msgs.msg import ImageMarker
-
 from yolo_msgs.msg import (
     BoundingBox2D,
     Detection,
@@ -62,8 +61,7 @@ def get_image_marker_msg_array(
     return img_marker_msg_array
 
 
-def parse_hypothesis(results: Results, class_names: List[str]) -> List[Dict]:
-
+def parse_hypothesis(results: Results, class_names: Dict[int, str]) -> List[Dict]:
     hypothesis_list = []
 
     if results.boxes:
@@ -150,7 +148,7 @@ def parse_masks(results: Results) -> List[Mask]:
     return masks_list
 
 
-def parse_keypoints(results: Results, threshold: float) -> List[KeyPoint2DArray]:
+def parse_keypoints(results: Results, threshold: float = 0.5) -> List[KeyPoint2DArray]:
     keypoints_list = []
 
     points: Keypoints
@@ -178,16 +176,21 @@ def parse_keypoints(results: Results, threshold: float) -> List[KeyPoint2DArray]
     return keypoints_list
 
 
-def get_detections(results: Results, header: Header) -> DetectionArray:
+def get_detections(
+    results: Results,
+    header: Header,
+    class_names: Dict[int, str],
+    keypoints_threshold: float = 0.5,
+) -> DetectionArray:
     if results.boxes or results.obb:
-        hypothesis = parse_hypothesis(results)
+        hypothesis = parse_hypothesis(results, class_names)
         boxes = parse_boxes(results)
 
     if results.masks:
         masks = parse_masks(results)
 
     if results.keypoints:
-        keypoints = parse_keypoints(results)
+        keypoints = parse_keypoints(results, keypoints_threshold)
 
     detections_msg = DetectionArray()
 

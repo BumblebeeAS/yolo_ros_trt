@@ -7,9 +7,9 @@ from cv_bridge import CvBridge
 from rclpy.node import Node
 from sensor_msgs.msg import CompressedImage
 from ultralytics import YOLO
+from yolo_msgs.msg import DetectionArray
 
 from src.yolo_node_helper import get_detections
-from yolo_msgs.msg import DetectionArray
 
 
 class YoloNode(Node):
@@ -47,7 +47,7 @@ class YoloNode(Node):
         cv_image = self.bridge.compressed_imgmsg_to_cv2(msg, desired_encoding="bgr8")
         results = self.model.predict(cv_image)[0].cpu()
 
-        detections = get_detections(results, msg.header)
+        detections = get_detections(results, msg.header, self.model.names)
         self.detections_publisher.publish(detections)
 
         # Debug image
