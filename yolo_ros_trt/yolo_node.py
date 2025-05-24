@@ -6,9 +6,10 @@ from ament_index_python import get_package_share_directory
 from cv_bridge import CvBridge
 from rclpy.node import Node
 from sensor_msgs.msg import CompressedImage
-from src.yolo_node_helper import get_detections
 from ultralytics import YOLO
 from yolo_msgs.msg import DetectionArray
+
+from yolo_ros_trt.utils.yolo_node_helper import get_detections
 
 
 class YoloNode(Node):
