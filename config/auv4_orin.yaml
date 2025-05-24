@@ -1,0 +1,9 @@
+/**:
+  ros__parameters:
+    model_name: "yolov11s_gate_20250522_1.engine"
+    conf: 0.25
+    iou: 0.7
+    agnostic_nms: true
+    input_compressed_image_topic: "image/compressed"
+    output_detections_topic: "yolo/detections"
+    output_compressed_image_topic: "yolo/image/compressed"
