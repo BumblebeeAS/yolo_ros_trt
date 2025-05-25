@@ -17,7 +17,7 @@ class YoloNode(Node):
     def __init__(self) -> None:
         super().__init__("yolo_node")
 
-        self.declare_parameter("model_name", "yolov11s_gate_20250520_0.engine")
+        self.declare_parameter("model_name", "yolov11s_segment.engine")
 
         # YOLO predict parameters
         # See https://docs.ultralytics.com/usage/cfg/#predict-settings

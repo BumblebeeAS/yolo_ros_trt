@@ -1,9 +1,16 @@
-/**:
+/**/gate_yolo_node:
   ros__parameters:
     model_name: "yolov11s_gate_20250522_1.engine"
     conf: 0.25
     iou: 0.7
     agnostic_nms: true
-    input_compressed_image_topic: "image/compressed"
+    input_compressed_image_topic: "color/image/compressed"
     output_detections_topic: "yolo/detections"
     output_compressed_image_topic: "yolo/image/compressed"
+
+/**/gate_pose_estimator_node:
+    ros__parameters:
+      camera_frame_id: auv4/front_cam_optical
+      object_frame_id: wesley_please_come_lab
+      camera_info_topic: color/camera_info
+      detections_topic: yolo/detections
