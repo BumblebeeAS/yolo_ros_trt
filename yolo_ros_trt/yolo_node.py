@@ -1,8 +1,5 @@
-import os
-
 import rclpy
 import supervision as sv
-from ament_index_python import get_package_share_directory
 from cv_bridge import CvBridge
 from rclpy.node import Node
 from sensor_msgs.msg import Image
@@ -17,7 +14,7 @@ class YoloNode(Node):
     def __init__(self) -> None:
         super().__init__("yolo_node")
 
-        self.declare_parameter("model_name", "yolov11s_segment.engine")
+        self.declare_parameter("model_path", "")
 
         # YOLO predict parameters
         # See https://docs.ultralytics.com/usage/cfg/#predict-settings
@@ -30,16 +27,11 @@ class YoloNode(Node):
         self.declare_parameter("output_image_topic", "yolo/image")
 
         # Load the model
-        model_name = self.get_parameter("model_name").get_parameter_value().string_value
+        model_path = self.get_parameter("model_path").get_parameter_value().string_value
         conf = self.get_parameter("conf").get_parameter_value().double_value
         iou = self.get_parameter("iou").get_parameter_value().double_value
         agnostic_nms = (
             self.get_parameter("agnostic_nms").get_parameter_value().bool_value
-        )
-        model_path = os.path.join(
-            get_package_share_directory("yolo_ros_trt"),
-            "models",
-            model_name,
         )
         model = YOLO(model_path, task="segment")
         self.model_predict = lambda image: model.predict(
