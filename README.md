@@ -18,7 +18,7 @@ For Nvidia Jetpack 6, see the [Ultralytics guide](https://docs.ultralytics.com/g
 
 ### Run
 
-Run `export.py` to export trained `.pt` models to `.engine` files. For example, 
+Run `export.py` to export trained `.pt` models to `.engine` files. For example,
 
 ```bash
 python export.py yolov11s_gate_20250520_0.pt
@@ -27,13 +27,21 @@ python export.py yolov11s_gate_20250520_0.pt
 Then run `yolo_node`. For example:
 
 ```bash
-ros2 run yolo_ros_trt yolo_node --ros-args -p model_name:="yolov11s_gate_20250520_0.engine"
+ros2 run yolo_ros_trt yolo_node --ros-args -p model_path:="yolov11s_gate_20250520_0.engine"
+```
+
+`yolo_node` is a lifecycle node that starts with the `Inactive` state. You can toggle the state to `Active` by
+
+```bash
+ros2 lifecycle set /yolo_node activate
 ```
 
 ## Note
 
 For object detection using YOLOv8, see [our fork of Isaac ROS Object Detection](https://github.com/BumblebeeAS/isaac_ros_object_detection) to utilize Nvidia's claim of higher efficiency due to zero copy.
 
-## Reference
+## References
 
-https://github.com/mgonzs13/yolo_ros
+- https://github.com/mgonzs13/yolo_ros
+- https://design.ros2.org/articles/node_lifecycle.html
+- https://foxglove.dev/blog/how-to-use-ros2-lifecycle-nodes
