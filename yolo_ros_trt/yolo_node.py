@@ -73,6 +73,7 @@ class YoloNode(LifecycleNode):
         except FileNotFoundError:
             self.get_logger().error(f"Model file '{model_path}' does not exists")
             return TransitionCallbackReturn.ERROR
+        self.get_logger().info(f"[{self.get_name()}] Model loaded: {model_path}")
 
         self.model_predict = lambda image: self.model.predict(
             image, conf=conf, iou=iou, agnostic_nms=agnostic_nms
