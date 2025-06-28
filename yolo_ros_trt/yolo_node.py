@@ -4,6 +4,7 @@ import rclpy
 import supervision as sv
 from cv_bridge import CvBridge
 from rclpy.lifecycle import LifecycleNode, LifecycleState, TransitionCallbackReturn
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
 from ultralytics import YOLO
 from yolo_msgs.msg import DetectionArray
@@ -46,10 +47,10 @@ class YoloNode(LifecycleNode):
             self.get_parameter("output_image_topic").get_parameter_value().string_value
         )
         self.detections_publisher = self.create_lifecycle_publisher(
-            DetectionArray, output_detections_topic, 1
+            DetectionArray, output_detections_topic, qos_profile=qos_profile_sensor_data
         )
         self.image_publisher = self.create_lifecycle_publisher(
-            Image, output_compressed_image_topic, 1
+            Image, output_compressed_image_topic, qos_profile=qos_profile_sensor_data
         )
 
         super().on_configure(state)
@@ -85,7 +86,10 @@ class YoloNode(LifecycleNode):
             self.get_parameter("input_image_topic").get_parameter_value().string_value
         )
         self.image_subscriber = self.create_subscription(
-            Image, input_compressed_image_topic, self.image_callback, 1
+            Image,
+            input_compressed_image_topic,
+            self.image_callback,
+            qos_profile_sensor_data,
         )
 
         super().on_activate(state)
