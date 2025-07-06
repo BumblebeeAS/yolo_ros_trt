@@ -3,13 +3,17 @@ import gc
 import rclpy
 import supervision as sv
 from cv_bridge import CvBridge
+from foxglove_msgs.msg import ImageAnnotations
 from rclpy.lifecycle import LifecycleNode, LifecycleState, TransitionCallbackReturn
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
 from ultralytics import YOLO
 from yolo_msgs.msg import DetectionArray
 
-from yolo_ros_trt.utils.yolo_node_helper import get_detections
+from yolo_ros_trt.utils.yolo_node_helper import (
+    get_detections,
+    get_image_annotations_from_detections,
+)
 
 
 class YoloNode(LifecycleNode):
@@ -27,7 +31,7 @@ class YoloNode(LifecycleNode):
 
         self.declare_parameter("input_image_topic", "image")
         self.declare_parameter("output_detections_topic", "yolo/detections")
-        self.declare_parameter("output_image_topic", "yolo/image")
+        self.declare_parameter("output_annotations_topic", "yolo/annotations")
 
     def on_configure(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f"[{self.get_name()}] Configuring...")
@@ -43,14 +47,18 @@ class YoloNode(LifecycleNode):
             .get_parameter_value()
             .string_value
         )
-        output_compressed_image_topic = (
-            self.get_parameter("output_image_topic").get_parameter_value().string_value
+        output_annotations_topic = (
+            self.get_parameter("output_annotations_topic")
+            .get_parameter_value()
+            .string_value
         )
         self.detections_publisher = self.create_lifecycle_publisher(
             DetectionArray, output_detections_topic, qos_profile=qos_profile_sensor_data
         )
-        self.image_publisher = self.create_lifecycle_publisher(
-            Image, output_compressed_image_topic, qos_profile=qos_profile_sensor_data
+        self.debug_annotations_publisher = self.create_lifecycle_publisher(
+            ImageAnnotations,
+            output_annotations_topic,
+            qos_profile=qos_profile_sensor_data,
         )
 
         super().on_configure(state)
@@ -82,12 +90,12 @@ class YoloNode(LifecycleNode):
         self.class_names = self.model.names
 
         # Create subscribers
-        input_compressed_image_topic = (
+        input_image_topic = (
             self.get_parameter("input_image_topic").get_parameter_value().string_value
         )
         self.image_subscriber = self.create_subscription(
             Image,
-            input_compressed_image_topic,
+            input_image_topic,
             self.image_callback,
             qos_profile_sensor_data,
         )
@@ -118,7 +126,9 @@ class YoloNode(LifecycleNode):
         self.get_logger().info(f"[{self.get_name()}] Cleaning up...")
 
         self.destroy_publisher(self.detections_publisher)
-        self.destroy_publisher(self.image_publisher)
+        self.detections_publisher = None
+        self.destroy_publisher(self.debug_annotations_publisher)
+        self.debug_annotations_publisher = None
 
         super().on_cleanup(state)
         self.get_logger().info(f"[{self.get_name()}] Cleaned up")
@@ -138,20 +148,12 @@ class YoloNode(LifecycleNode):
         detections = get_detections(results, msg.header, self.class_names)
         self.detections_publisher.publish(detections)
 
-        # Debug image
-        detections = sv.Detections.from_ultralytics(results)
-
-        annotated_image = self.polygon_annotator.annotate(
-            scene=cv_image, detections=detections
+        # Debug annotations
+        sv_detections = sv.Detections.from_ultralytics(results)
+        image_annotations = get_image_annotations_from_detections(
+            sv_detections, msg.header
         )
-        annotated_image = self.label_annotator.annotate(
-            scene=annotated_image, detections=detections
-        )
-
-        output_msg = self.bridge.cv2_to_imgmsg(annotated_image, encoding="bgr8")
-        output_msg.header = msg.header
-
-        self.image_publisher.publish(output_msg)
+        self.debug_annotations_publisher.publish(image_annotations)
 
 
 def main(args=None):

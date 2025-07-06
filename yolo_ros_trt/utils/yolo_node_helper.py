@@ -1,12 +1,17 @@
 from typing import Dict, List
 
-import numpy as np
 import supervision as sv
-from foxglove_msgs.msg import ImageMarkerArray
-from geometry_msgs.msg import Point
-from std_msgs.msg import ColorRGBA, Header
+from foxglove_msgs.msg import (
+    Color,
+    ImageAnnotations,
+    Point2,
+    PointsAnnotation,
+    TextAnnotation,
+)
+from std_msgs.msg import Header
+from supervision.config import CLASS_NAME_DATA_FIELD
+from supervision.geometry.core import Position
 from ultralytics.engine.results import Boxes, Keypoints, Masks, Results
-from visualization_msgs.msg import ImageMarker
 from yolo_msgs.msg import (
     BoundingBox2D,
     Detection,
@@ -17,48 +22,81 @@ from yolo_msgs.msg import (
     Point2D,
 )
 
+# Source: https://supervision.roboflow.com/draw/color/#supervision.draw.color.ColorPalette.DEFAULT
+DEFAULT_COLOR_PALETTE = [
+    "#e6194b",
+    "#3cb44b",
+    "#ffe119",
+    "#0082c8",
+    "#f58231",
+    "#911eb4",
+    "#46f0f0",
+    "#f032e6",
+    "#d2f53c",
+    "#fabebe",
+    "#008080",
+    "#e6beff",
+    "#aa6e28",
+    "#fffac8",
+    "#800000",
+    "#aaffc3",
+]
 
-def points_list_to_ros_points(points_list: np.ndarray) -> List[Point]:
-    def create_point2d(x: float, y: float) -> Point:
-        p = Point()
-        p.x = x
-        p.y = y
-        return p
 
-    ros_points = []
-    points_list = points_list.astype(float)
-    for point in points_list:
-        point = create_point2d(*point)
-        ros_points.append(point)
+def get_image_annotations_from_detections(
+    detections: sv.Detections,
+    header: Header,
+    colors: List[str] = DEFAULT_COLOR_PALETTE,
+    font_size: float = 50.0,
+) -> ImageAnnotations:
+    def hex_to_rgba(hex_color: str) -> tuple:
+        hex_color = hex_color.lstrip("#")
+        r, g, b = (
+            int(hex_color[0:2], 16),
+            int(hex_color[2:4], 16),
+            int(hex_color[4:6], 16),
+        )
+        a = 255
+        return (r, g, b, a)
 
-    return ros_points
-
-
-def get_image_marker_msg_array(
-    detections: sv.Detections, header: Header
-) -> ImageMarkerArray:
-    img_marker_msg_array = ImageMarkerArray()
+    image_annotations = ImageAnnotations()
+    bbox_top_left_positions = detections.get_anchors_coordinates(Position.TOP_LEFT)
 
     if detections.mask is not None:
-        for class_id, mask in zip(detections.class_id, detections.mask):
-            img_marker_msg = ImageMarker()
-            img_marker_msg.header = header
-            img_marker_msg.id = int(class_id)
-            img_marker_msg.type = ImageMarker.POLYGON
-            points_list = sv.detection.utils.mask_to_polygons(mask)[0]
-            ros_points = points_list_to_ros_points(points_list)
-            img_marker_msg.points = ros_points
-            outline_color = ColorRGBA()
-            outline_color.r = 0.0
-            outline_color.g = 1.0
-            outline_color.b = 0.0
-            outline_color.a = 1.0
-            img_marker_msg.outline_color = outline_color
-            img_marker_msg.scale = 1.0
+        for class_id, class_label, confidence, bbox_top_left_position, mask in zip(
+            detections.class_id,
+            detections[CLASS_NAME_DATA_FIELD],
+            detections.confidence,
+            bbox_top_left_positions,
+            detections.mask,
+        ):
+            polygons = sv.detection.utils.mask_to_polygons(mask)
+            for polygon in polygons:
+                points = [Point2(x=float(x), y=float(y)) for x, y in polygon]
+                outline_color = hex_to_rgba(colors[class_id % len(colors)])
+                r, g, b, a = map(lambda x: x / 255.0, outline_color)
 
-            img_marker_msg_array.markers.append(img_marker_msg)
+                points_annotation = PointsAnnotation(
+                    timestamp=header.stamp,
+                    type=PointsAnnotation.LINE_STRIP,
+                    points=points,
+                    outline_color=Color(r=r, g=g, b=b, a=a),
+                    thickness=5.0,
+                )
+                image_annotations.points.append(points_annotation)
 
-    return img_marker_msg_array
+            text_position_x, text_position_y = bbox_top_left_position
+            text_annotation = TextAnnotation(
+                timestamp=header.stamp,
+                position=Point2(x=float(text_position_x), y=float(text_position_y)),
+                text=f"{class_label} {confidence:.2f}",
+                font_size=font_size,
+                text_color=Color(r=1.0, g=1.0, b=1.0, a=1.0),
+                background_color=Color(r=r, g=g, b=b, a=a),
+            )
+            image_annotations.texts.append(text_annotation)
+
+    return image_annotations
 
 
 def parse_hypothesis(results: Results, class_names: Dict[int, str]) -> List[Dict]:
