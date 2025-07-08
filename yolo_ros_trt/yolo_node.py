@@ -18,8 +18,8 @@ from yolo_ros_trt.utils.yolo_node_helper import (
 
 class YoloNode(LifecycleNode):
 
-    def __init__(self) -> None:
-        super().__init__("yolo_node")
+    def __init__(self, name="yolo_node") -> None:
+        super().__init__(name)
 
         self.declare_parameter("model_path", "")
 

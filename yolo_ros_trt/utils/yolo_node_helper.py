@@ -109,6 +109,7 @@ def parse_hypothesis(results: Results, class_names: Dict[int, str]) -> List[Dict
                 "class_id": int(box_data.cls),
                 "class_name": class_names[int(box_data.cls)],
                 "score": float(box_data.conf),
+                "id": str(int(box_data.id)) if box_data.id is not None else "null",
             }
             hypothesis_list.append(hypothesis)
 
@@ -118,6 +119,9 @@ def parse_hypothesis(results: Results, class_names: Dict[int, str]) -> List[Dict
                 "class_id": int(results.obb.cls[i]),
                 "class_name": class_names[int(results.obb.cls[i])],
                 "score": float(results.obb.conf[i]),
+                "id": (
+                    str(int(results.obb.id)) if results.obb.id is not None else "null"
+                ),
             }
             hypothesis_list.append(hypothesis)
 
@@ -240,6 +244,7 @@ def get_detections(
             aux_msg.class_id = hypothesis[i]["class_id"]
             aux_msg.class_name = hypothesis[i]["class_name"]
             aux_msg.score = hypothesis[i]["score"]
+            aux_msg.id = hypothesis[i]["id"]
 
             aux_msg.bbox = boxes[i]
 
