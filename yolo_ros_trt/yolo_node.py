@@ -36,10 +36,6 @@ class YoloNode(LifecycleNode):
     def on_configure(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f"[{self.get_name()}] Configuring...")
 
-        # Annotation tools
-        self.polygon_annotator = sv.PolygonAnnotator()
-        self.label_annotator = sv.LabelAnnotator(text_scale=1.0)
-
         # Create publishers
         self.bridge = CvBridge()
         output_detections_topic = (
