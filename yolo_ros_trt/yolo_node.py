@@ -32,6 +32,8 @@ class YoloNode(LifecycleNode):
         self.declare_parameter("input_image_topic", "image")
         self.declare_parameter("output_detections_topic", "yolo/detections")
         self.declare_parameter("output_annotations_topic", "yolo/annotations")
+        self.declare_parameter("display_tracker_id", False)
+        self.declare_parameter("font_size", 50.0)
 
     def on_configure(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f"[{self.get_name()}] Configuring...")
@@ -146,8 +148,15 @@ class YoloNode(LifecycleNode):
 
         # Debug annotations
         sv_detections = sv.Detections.from_ultralytics(results)
+        font_size = self.get_parameter("font_size").get_parameter_value().double_value
+        display_tracker_id = (
+            self.get_parameter("display_tracker_id").get_parameter_value().bool_value
+        )
         image_annotations = get_image_annotations_from_detections(
-            sv_detections, msg.header
+            sv_detections,
+            msg.header,
+            font_size=font_size,
+            display_tracker_id=display_tracker_id,
         )
         self.debug_annotations_publisher.publish(image_annotations)
 

@@ -48,6 +48,7 @@ def get_image_annotations_from_detections(
     header: Header,
     colors: List[str] = DEFAULT_COLOR_PALETTE,
     font_size: float = 50.0,
+    display_tracker_id: bool = False,
 ) -> ImageAnnotations:
     def hex_to_rgba(hex_color: str) -> tuple:
         hex_color = hex_color.lstrip("#")
@@ -63,13 +64,13 @@ def get_image_annotations_from_detections(
     bbox_top_left_positions = detections.get_anchors_coordinates(Position.TOP_LEFT)
 
     if detections.mask is not None:
-        for class_id, class_label, confidence, bbox_top_left_position, mask in zip(
-            detections.class_id,
-            detections[CLASS_NAME_DATA_FIELD],
-            detections.confidence,
-            bbox_top_left_positions,
-            detections.mask,
-        ):
+        for i in range(len(detections.mask)):
+            class_id = detections.class_id[i]
+            class_label = detections[CLASS_NAME_DATA_FIELD][i]
+            confidence = detections.confidence[i]
+            bbox_top_left_position = bbox_top_left_positions[i]
+            mask = detections.mask[i]
+
             polygons = sv.detection.utils.mask_to_polygons(mask)
             for polygon in polygons:
                 points = [Point2(x=float(x), y=float(y)) for x, y in polygon]
@@ -86,10 +87,16 @@ def get_image_annotations_from_detections(
                 image_annotations.points.append(points_annotation)
 
             text_position_x, text_position_y = bbox_top_left_position
+            if display_tracker_id and detections.tracker_id is not None:
+                tracker_id = detections.tracker_id[i]
+                text = f"{class_label} {confidence:.2f} {tracker_id}"
+            else:
+                text = f"{class_label} {confidence:.2f}"
+
             text_annotation = TextAnnotation(
                 timestamp=header.stamp,
                 position=Point2(x=float(text_position_x), y=float(text_position_y)),
-                text=f"{class_label} {confidence:.2f}",
+                text=text,
                 font_size=font_size,
                 text_color=Color(r=1.0, g=1.0, b=1.0, a=1.0),
                 background_color=Color(r=r, g=g, b=b, a=a),
