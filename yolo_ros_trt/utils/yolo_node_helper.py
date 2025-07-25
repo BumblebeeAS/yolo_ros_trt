@@ -10,6 +10,7 @@ from foxglove_msgs.msg import (
 )
 from std_msgs.msg import Header
 from supervision.config import CLASS_NAME_DATA_FIELD
+from supervision.detection.utils.converters import mask_to_polygons
 from supervision.geometry.core import Position
 from ultralytics.engine.results import Boxes, Keypoints, Masks, Results
 from yolo_msgs.msg import (
@@ -71,7 +72,7 @@ def get_image_annotations_from_detections(
             bbox_top_left_position = bbox_top_left_positions[i]
             mask = detections.mask[i]
 
-            polygons = sv.detection.utils.mask_to_polygons(mask)
+            polygons = mask_to_polygons(mask)
             for polygon in polygons:
                 points = [Point2(x=float(x), y=float(y)) for x, y in polygon]
                 outline_color = hex_to_rgba(colors[class_id % len(colors)])
