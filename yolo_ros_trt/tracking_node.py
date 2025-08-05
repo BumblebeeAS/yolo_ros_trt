@@ -1,4 +1,7 @@
+from pathlib import Path
+
 import rclpy
+from ament_index_python import get_package_share_directory
 from rclpy.lifecycle import LifecycleState, TransitionCallbackReturn
 
 from yolo_ros_trt.yolo_node import YoloNode
@@ -18,8 +21,18 @@ class TrackingNode(YoloNode):
         agnostic_nms = (
             self.get_parameter("agnostic_nms").get_parameter_value().bool_value
         )
+        tracker_file_path = (
+            Path(get_package_share_directory("yolo_ros_trt"))
+            / "config"
+            / "bytetrack.yaml"
+        )
         self.model_predict = lambda image: self.model.track(
-            image, conf=conf, iou=iou, agnostic_nms=agnostic_nms, persist=True
+            image,
+            conf=conf,
+            iou=iou,
+            agnostic_nms=agnostic_nms,
+            persist=True,
+            tracker=tracker_file_path,
         )
 
         self.get_logger().info(f"[{self.get_name()}] Activated")
