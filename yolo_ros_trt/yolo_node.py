@@ -1,4 +1,5 @@
 import gc
+from pathlib import Path
 
 import rclpy
 import supervision as sv
@@ -34,6 +35,12 @@ class YoloNode(LifecycleNode):
         self.declare_parameter("output_annotations_topic", "yolo/annotations")
         self.declare_parameter("display_tracker_id", False)
         self.declare_parameter("font_size", 50.0)
+
+        # Check if the model file exists
+        model_path = self.get_parameter("model_path").get_parameter_value().string_value
+        my_file = Path(model_path)
+        if not my_file.is_file():
+            raise ValueError(f"Model file '{model_path}' does not exist")
 
     def on_configure(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f"[{self.get_name()}] Configuring...")
