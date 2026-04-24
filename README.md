@@ -4,7 +4,7 @@
 
 ### Installation
 
-1. Build `yolo_msgs` in [bb_msgs](https://github.com/BumblebeeAS/bb_msgs/).
+1. Build `yolo_msgs` from [yolo_ros](https://github.com/mgonzs13/yolo_ros).
 
 2. Install the required Python packages.
 
