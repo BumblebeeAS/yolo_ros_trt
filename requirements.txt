@@ -1,3 +1,4 @@
 lap
 supervision
+tensorrt
 typer
