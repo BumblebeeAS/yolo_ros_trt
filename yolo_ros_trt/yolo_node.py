@@ -29,6 +29,7 @@ class YoloNode(LifecycleNode):
         self.declare_parameter("conf", 0.25)
         self.declare_parameter("iou", 0.7)
         self.declare_parameter("agnostic_nms", False)
+        self.declare_parameter("activate_on_start", False)
 
         self.declare_parameter("input_image_topic", "image")
         self.declare_parameter("output_detections_topic", "yolo/detections")
@@ -172,6 +173,8 @@ def main(args=None):
     rclpy.init(args=args)
     node = YoloNode()
     node.trigger_configure()
+    if node.get_parameter("activate_on_start").get_parameter_value().bool_value:
+        node.trigger_activate()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
