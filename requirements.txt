@@ -2,3 +2,4 @@ lap
 supervision
 tensorrt
 typer
+ultralytics

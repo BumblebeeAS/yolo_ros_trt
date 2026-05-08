@@ -12,9 +12,11 @@
   <test_depend>ament_pep257</test_depend>
   <test_depend>python3-pytest</test_depend>
 
+  <depend>ament_index_python</depend>
   <depend>cv_bridge</depend>
   <depend>std_srvs</depend>
   <depend>foxglove_msgs</depend>
+  <depend>rclpy</depend>
   <depend>sensor_msgs</depend>
   <depend>visualization_msgs</depend>
   <depend>yolo_msgs</depend>
