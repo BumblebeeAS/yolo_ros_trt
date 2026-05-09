@@ -1,5 +1,3 @@
-from typing import Dict, List
-
 import supervision as sv
 from foxglove_msgs.msg import (
     Color,
@@ -47,7 +45,7 @@ DEFAULT_COLOR_PALETTE = [
 def get_image_annotations_from_detections(
     detections: sv.Detections,
     header: Header,
-    colors: List[str] = DEFAULT_COLOR_PALETTE,
+    colors: list[str] = DEFAULT_COLOR_PALETTE,
     font_size: float = 50.0,
     display_tracker_id: bool = False,
 ) -> ImageAnnotations:
@@ -107,7 +105,7 @@ def get_image_annotations_from_detections(
     return image_annotations
 
 
-def parse_hypothesis(results: Results, class_names: Dict[int, str]) -> List[Dict]:
+def parse_hypothesis(results: Results, class_names: dict[int, str]) -> list[dict]:
     hypothesis_list = []
 
     if results.boxes:
@@ -136,7 +134,7 @@ def parse_hypothesis(results: Results, class_names: Dict[int, str]) -> List[Dict
     return hypothesis_list
 
 
-def parse_boxes(results: Results) -> List[BoundingBox2D]:
+def parse_boxes(results: Results) -> list[BoundingBox2D]:
     boxes_list = []
 
     if results.boxes:
@@ -173,7 +171,7 @@ def parse_boxes(results: Results) -> List[BoundingBox2D]:
     return boxes_list
 
 
-def parse_masks(results: Results) -> List[Mask]:
+def parse_masks(results: Results) -> list[Mask]:
     masks_list = []
 
     def create_point2d(x: float, y: float) -> Point2D:
@@ -198,7 +196,7 @@ def parse_masks(results: Results) -> List[Mask]:
     return masks_list
 
 
-def parse_keypoints(results: Results, threshold: float = 0.5) -> List[KeyPoint2DArray]:
+def parse_keypoints(results: Results, threshold: float = 0.5) -> list[KeyPoint2DArray]:
     keypoints_list = []
 
     points: Keypoints
@@ -229,7 +227,7 @@ def parse_keypoints(results: Results, threshold: float = 0.5) -> List[KeyPoint2D
 def get_detections(
     results: Results,
     header: Header,
-    class_names: Dict[int, str],
+    class_names: dict[int, str],
     keypoints_threshold: float = 0.5,
 ) -> DetectionArray:
     if results.boxes or results.obb:
