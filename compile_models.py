@@ -14,7 +14,7 @@ from rich.text import Text
 
 console = Console()
 err_console = Console(stderr=True)
-app = typer.Typer(help="Compile latest YOLOv11 models to TensorRT engine format")
+app = typer.Typer(help="Compile latest YOLO models to TensorRT engine format")
 
 
 def export_model_to_engine(model_file_path: str) -> None:
@@ -47,7 +47,7 @@ def check_compiled_files_exist(pt_file_path: str) -> dict[str, bool]:
 def parse_filename(filename: str) -> dict[str, Any] | None:
     """Parse filename to extract category, date, and index.
 
-    Expected format: yolov11s_{category}_{yyyymmdd}_{index}.{ext}
+    Expected format: yolov{version}_{category}_{yyyymmdd}[_{index}].{ext}
 
     Args:
         filename (str): The filename to parse
@@ -55,8 +55,8 @@ def parse_filename(filename: str) -> dict[str, Any] | None:
     Returns:
         Dict with category, date, index, and extension, or None if parsing fails
     """
-    # Pattern to match yolov11s_{category}_{date}_{index}.{ext}
-    pattern = r"yolov11s_(.+?)_(\d{8})_(\d+)\.(pt|onnx|engine)$"
+    # Pattern to match yolov{version}_{category}_{date}[_{index}].{ext}
+    pattern = r"yolov\d+[a-z]?_(.+?)_(\d{8})(?:_(\d+))?\.(pt|onnx|engine)$"
     match = re.match(pattern, filename)
 
     if match:
@@ -64,7 +64,7 @@ def parse_filename(filename: str) -> dict[str, Any] | None:
         return {
             "category": category,
             "date": int(date_str),
-            "index": int(index_str),
+            "index": int(index_str) if index_str is not None else 0,
             "extension": ext,
             "filename": filename,
         }
@@ -143,7 +143,7 @@ def compile_latest(
         help="Show what would be compiled without actually compiling",
     ),
 ):
-    """Compile the latest YOLOv11 models for each category to TensorRT engine format."""
+    """Compile the latest YOLO models for each category to TensorRT engine format."""
 
     try:
         # Convert to Path object and validate
