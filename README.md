@@ -36,6 +36,10 @@ ros2 run yolo_ros_trt yolo_node --ros-args -p model_path:="yolov11s_gate_2025052
 ros2 lifecycle set /yolo_node activate
 ```
 
+## Usage
+
+The node expects a TensorRT engine and does not publish until activated. Use `tracking_node` when temporal tracking is required.
+
 ## Note
 
 For object detection using YOLOv8, see [our fork of Isaac ROS Object Detection](https://github.com/BumblebeeAS/isaac_ros_object_detection) to utilize Nvidia's claim of higher efficiency due to zero copy.
