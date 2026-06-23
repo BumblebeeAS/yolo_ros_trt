@@ -32,6 +32,7 @@ setup(
         "console_scripts": [
             "tracking_node = yolo_ros_trt.tracking_node:main",
             "yolo_node = yolo_ros_trt.yolo_node:main",
+            "multi_yolo_node = yolo_ros_trt.multi_yolo_node:main",
         ],
     },
 )
