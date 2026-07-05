@@ -12,6 +12,10 @@ class TrackingNode(YoloNode):
     def __init__(self) -> None:
         super().__init__("tracking_node")
 
+        # Which tracker config file (in this package's `config/` dir) to use.
+        # Set to `botsort.yaml` for BoT-SORT + ReID (handles long occlusions).
+        self.declare_parameter("tracker_config", "bytetrack.yaml")
+
     def on_activate(self, state: LifecycleState) -> TransitionCallbackReturn:
         super().on_activate(state)
 
@@ -21,10 +25,16 @@ class TrackingNode(YoloNode):
         agnostic_nms = (
             self.get_parameter("agnostic_nms").get_parameter_value().bool_value
         )
+        tracker_config = (
+            self.get_parameter("tracker_config").get_parameter_value().string_value
+        )
         tracker_file_path = (
             Path(get_package_share_directory("yolo_ros_trt"))
             / "config"
-            / "bytetrack.yaml"
+            / tracker_config
+        )
+        self.get_logger().info(
+            f"[{self.get_name()}] Using tracker config: {tracker_file_path}"
         )
         self.model_predict = lambda image: self.model.track(
             image,
