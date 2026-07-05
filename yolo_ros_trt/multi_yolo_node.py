@@ -9,6 +9,16 @@ independently, which saturates CPU/memory bandwidth and starves the camera
 debayer. Collapsing the models that are always activated together into one node
 cuts that to a single reader + single decode.
 
+Each model runs on its own worker thread fed through a single-slot "latest
+frame" handoff: the subscription callback only decodes and hands the frame to
+every model's slot, and each worker infers at its own pace, always on the
+newest frame (older undelivered frames are overwritten, never queued). This
+decouples the models' publish rates -- a cheap predict-mode model is not
+throttled to the rate of an expensive track-mode one, which sequential
+in-callback inference forced. The GPU serializes kernels across threads, but
+inference is only part of each model's wall time (tracker + postprocess are
+CPU), so the overlap is real.
+
 This keeps the existing lifecycle framework unchanged: it is still one
 LifecycleNode with the standard configure/activate/deactivate transitions, so
 the vision lifecycle manager and mission planner drive it exactly as before --
@@ -35,6 +45,7 @@ Params:
 
 import gc
 import os
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,7 +56,12 @@ from ament_index_python.packages import get_package_share_directory
 from cv_bridge import CvBridge
 from foxglove_msgs.msg import ImageAnnotations
 from rclpy.lifecycle import LifecycleNode, LifecycleState, TransitionCallbackReturn
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import (
+    HistoryPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_sensor_data,
+)
 from rclpy.time import Time
 from sensor_msgs.msg import Image
 from ultralytics import YOLO
@@ -54,6 +70,14 @@ from yolo_msgs.msg import DetectionArray
 from yolo_ros_trt.utils.yolo_node_helper import (
     get_detections,
     get_image_annotations_from_detections,
+)
+
+# Best-effort, newest-sample-only QoS for the image subscription. Depth 1 means
+# a busy node never drains a backlog of stale frames (age stays ~1 frame).
+QOS_IMAGE_SUB = QoSProfile(
+    reliability=ReliabilityPolicy.BEST_EFFORT,
+    history=HistoryPolicy.KEEP_LAST,
+    depth=1,
 )
 
 
@@ -70,11 +94,72 @@ class _ModelCfg:
     tracker: str  # tracker config (used only when mode == "track")
 
 
-class _ModelInstance:
-    """One YOLO model: config, loaded engine, and its output publishers.
+class _LatestFrameSlot:
+    """Single-slot handoff between the subscription callback and one worker.
 
-    Publishers are created once at configure time (lifecycle publishers); the
-    engine is loaded on activate and freed on deactivate.
+    put() overwrites whatever is waiting, so a slow consumer always sees the
+    newest frame instead of a growing backlog. take() blocks until a frame
+    arrives or the slot is closed (returns None to tell the worker to exit).
+    """
+
+    def __init__(self) -> None:
+        self._cond = threading.Condition()
+        self._item = None
+        self._closed = False
+
+    def put(self, item) -> None:
+        with self._cond:
+            self._item = item
+            self._cond.notify()
+
+    def take(self):
+        with self._cond:
+            while self._item is None and not self._closed:
+                self._cond.wait()
+            item, self._item = self._item, None
+            return item
+
+    def close(self) -> None:
+        with self._cond:
+            self._closed = True
+            self._cond.notify()
+
+
+class _WindowStats:
+    """Windowed mean/max accumulator plus the window's achieved rate."""
+
+    def __init__(self, keys: tuple[str, ...]) -> None:
+        self._keys = keys
+        self.reset()
+
+    def reset(self) -> None:
+        self.n = 0
+        self._t_start = time.perf_counter()
+        self._sum = {k: 0.0 for k in self._keys}
+        self._max = {k: 0.0 for k in self._keys}
+
+    def add(self, **vals: float) -> None:
+        self.n += 1
+        for k, v in vals.items():
+            self._sum[k] += v
+            if v > self._max[k]:
+                self._max[k] = v
+
+    def hz(self) -> float:
+        dt = time.perf_counter() - self._t_start
+        return self.n / dt if dt > 0.0 else 0.0
+
+    def fmt(self, key: str) -> str:
+        return f"{self._sum[key] / self.n:.1f}/{self._max[key]:.1f}"
+
+
+class _ModelInstance:
+    """One YOLO model: config, loaded engine, publishers, and worker thread.
+
+    Publishers are created once at configure time; the engine is loaded on
+    activate and freed on deactivate. Between start() and stop() a dedicated
+    worker thread consumes frames from this model's slot, so every call into
+    the YOLO object (and its tracker state) happens on that one thread.
     """
 
     def __init__(self, node: LifecycleNode, cfg: _ModelCfg) -> None:
@@ -82,10 +167,11 @@ class _ModelInstance:
         self.cfg = cfg
         self.model = None
         self._infer = None
-        # Plain publishers (not lifecycle publishers): inference only runs while
-        # the node is active because the image subscription is created/destroyed
-        # in on_activate/on_deactivate, so publish() is only ever called when
-        # active anyway.
+        self._slot = None
+        self._thread = None
+        # Plain publishers (not lifecycle publishers): the workers only run
+        # between on_activate and on_deactivate, so publish() is only ever
+        # called when active anyway.
         self.det_pub = node.create_publisher(
             DetectionArray, cfg.detections_topic, qos_profile_sensor_data
         )
@@ -128,6 +214,27 @@ class _ModelInstance:
             self.model = None
             self._infer = None
 
+    def start(self, profiling: bool, prof_every: int) -> None:
+        self._profiling = profiling
+        self._prof_every = prof_every
+        self._stats = _WindowStats(("infer_ms", "e2e_ms"))
+        self._slot = _LatestFrameSlot()
+        self._thread = threading.Thread(
+            target=self._run_loop, name=f"yolo-{self.cfg.name}", daemon=True
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        if self._slot is not None:
+            self._slot.close()
+        if self._thread is not None:
+            self._thread.join()
+        self._slot = None
+        self._thread = None
+
+    def submit(self, cv_image, header) -> None:
+        self._slot.put((cv_image, header))
+
     def destroy(self) -> None:
         if self.det_pub is not None:
             self._node.destroy_publisher(self.det_pub)
@@ -136,9 +243,37 @@ class _ModelInstance:
             self._node.destroy_publisher(self.ann_pub)
             self.ann_pub = None
 
-    def infer_and_publish(
-        self, cv_image, header, font_size, display_tracker_id
-    ) -> None:
+    def _run_loop(self) -> None:
+        while True:
+            item = self._slot.take()
+            if item is None:
+                return
+            cv_image, header = item
+            t0 = time.perf_counter()
+            try:
+                self._infer_and_publish(cv_image, header)
+            except Exception as e:
+                # A bad frame must not kill the worker: log and move on.
+                self._node.get_logger().error(
+                    f"[{self.cfg.name}] inference failed: {e}"
+                )
+                continue
+            if self._profiling:
+                infer_ms = (time.perf_counter() - t0) * 1e3
+                e2e_ms = (
+                    self._node.get_clock().now() - Time.from_msg(header.stamp)
+                ).nanoseconds / 1e6
+                self._stats.add(infer_ms=infer_ms, e2e_ms=e2e_ms)
+                if self._stats.n >= self._prof_every:
+                    self._node.get_logger().info(
+                        f"[prof:{self.cfg.name}] n={self._stats.n} "
+                        f"infer {self._stats.fmt('infer_ms')} | "
+                        f"e2e(stamp->pub) {self._stats.fmt('e2e_ms')} ms (mean/max) | "
+                        f"{self._stats.hz():.1f} Hz"
+                    )
+                    self._stats.reset()
+
+    def _infer_and_publish(self, cv_image, header) -> None:
         results = self._infer(cv_image)[0].cpu()
 
         detections = get_detections(results, header, self.model.names)
@@ -148,8 +283,12 @@ class _ModelInstance:
         image_annotations = get_image_annotations_from_detections(
             sv_detections,
             header,
-            font_size=font_size,
-            display_tracker_id=display_tracker_id,
+            font_size=self._node.get_parameter("font_size")
+            .get_parameter_value()
+            .double_value,
+            display_tracker_id=self._node.get_parameter("display_tracker_id")
+            .get_parameter_value()
+            .bool_value,
         )
         self.ann_pub.publish(image_annotations)
 
@@ -163,7 +302,7 @@ class MultiYoloNode(LifecycleNode):
         self.declare_parameter("activate_on_start", False)
         self.declare_parameter("font_size", 50.0)
         self.declare_parameter("display_tracker_id", False)
-        self.declare_parameter("enable_profiling", True)
+        self.declare_parameter("enable_profiling", False)
         self.declare_parameter("profiling_log_every", 30)
 
         # Model list (required) + per-model params.
@@ -236,7 +375,6 @@ class MultiYoloNode(LifecycleNode):
         )
         self.bridge = CvBridge()
         self._models = [_ModelInstance(self, cfg) for cfg in self._cfgs]
-        self._prof_reset()
         super().on_configure(state)
         self.get_logger().info(
             f"[{self.get_name()}] Configured models: {[c.name for c in self._cfgs]}"
@@ -245,29 +383,34 @@ class MultiYoloNode(LifecycleNode):
 
     def on_activate(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f"[{self.get_name()}] Activating...")
-        for m in self._models:
-            m.load()
-            self.get_logger().info(f"[{self.get_name()}] Loaded model '{m.cfg.name}'")
-
-        input_image_topic = (
-            self.get_parameter("input_image_topic").get_parameter_value().string_value
-        )
-        self._profiling = (
+        profiling = (
             self.get_parameter("enable_profiling").get_parameter_value().bool_value
         )
-        self._prof_every = max(
+        prof_every = max(
             1,
             self.get_parameter("profiling_log_every")
             .get_parameter_value()
             .integer_value,
         )
-        self._prof_reset()
+        self._profiling = profiling
+        self._cam_stats = _WindowStats(("age_ms", "decode_ms"))
+        self._prof_every = prof_every
 
-        # Single shared subscription -> single decode for all models.
-        sub_qos_profile = qos_profile_sensor_data
-        sub_qos_profile.depth = 2
+        for m in self._models:
+            m.load()
+            m.start(profiling, prof_every)
+            self.get_logger().info(f"[{self.get_name()}] Loaded model '{m.cfg.name}'")
+
+        input_image_topic = (
+            self.get_parameter("input_image_topic").get_parameter_value().string_value
+        )
+        # Single shared subscription -> single decode, fanned out to the
+        # per-model worker threads via their latest-frame slots.
         self.image_subscriber = self.create_subscription(
-            Image, input_image_topic, self.image_callback, qos_profile=sub_qos_profile
+            Image,
+            input_image_topic,
+            self.image_callback,
+            qos_profile=QOS_IMAGE_SUB,
         )
         self.get_logger().info(
             f"[{self.get_name()}] Subscribed to '{input_image_topic}' for "
@@ -282,7 +425,9 @@ class MultiYoloNode(LifecycleNode):
         if self.image_subscriber is not None:
             self.destroy_subscription(self.image_subscriber)
             self.image_subscriber = None
+        # Workers must exit before their engines are freed.
         for m in self._models:
+            m.stop()
             m.unload()
         gc.collect()
         super().on_deactivate(state)
@@ -298,15 +443,16 @@ class MultiYoloNode(LifecycleNode):
 
     def on_shutdown(self, state: LifecycleState) -> TransitionCallbackReturn:
         # Shutdown can be entered from ANY state (incl. active), so tear down
-        # everything idempotently: drop the subscription, free every engine +
-        # tracker state, then destroy publishers. unload()/destroy() guard against
-        # being called when already cleaned, so this is safe regardless of which
-        # transitions ran before.
+        # everything idempotently: drop the subscription, stop every worker,
+        # free every engine + tracker state, then destroy publishers. stop()/
+        # unload()/destroy() guard against being called when already cleaned,
+        # so this is safe regardless of which transitions ran before.
         self.get_logger().info(f"[{self.get_name()}] Shutting down...")
         if getattr(self, "image_subscriber", None) is not None:
             self.destroy_subscription(self.image_subscriber)
             self.image_subscriber = None
         for m in self._models:
+            m.stop()
             m.unload()
             m.destroy()
         self._models = []
@@ -321,81 +467,24 @@ class MultiYoloNode(LifecycleNode):
         ).nanoseconds / 1e6
 
         cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
-        t_decode = time.perf_counter()
+        decode_ms = (time.perf_counter() - t0) * 1e3
 
-        # Sequential inference. The models share one GPU, which serializes their
-        # kernels anyway, so running them in sequence costs the same wall time as
-        # threads would while keeping the node simple.
-        per_model_ms = {}
+        # Fan the decoded frame out to every model's slot. Workers read the
+        # array without copying (ultralytics letterboxes into its own buffer),
+        # so sharing one numpy image across threads is safe.
         for m in self._models:
-            ts = time.perf_counter()
-            m.infer_and_publish(
-                cv_image,
-                msg.header,
-                self.get_parameter("font_size").get_parameter_value().double_value,
-                self.get_parameter("display_tracker_id")
-                .get_parameter_value()
-                .bool_value,
-            )
-            per_model_ms[m.cfg.name] = (time.perf_counter() - ts) * 1e3
-        t_end = time.perf_counter()
+            m.submit(cv_image, msg.header)
 
         if self._profiling:
-            self._prof_record(
-                age_ms=age_ms,
-                decode_ms=(t_decode - t0) * 1e3,
-                infer_ms=(t_end - t_decode) * 1e3,
-                e2e_ms=age_ms + (t_end - t0) * 1e3,
-                per_model_ms=per_model_ms,
-            )
-
-    # --- lightweight windowed profiling -------------------------------------
-
-    def _prof_reset(self) -> None:
-        self._prof_n = 0
-        self._prof_sum = {
-            "age_ms": 0.0,
-            "decode_ms": 0.0,
-            "infer_ms": 0.0,
-            "e2e_ms": 0.0,
-        }
-        self._prof_max = {
-            "age_ms": 0.0,
-            "decode_ms": 0.0,
-            "infer_ms": 0.0,
-            "e2e_ms": 0.0,
-        }
-        self._prof_model_sum: dict[str, float] = {}
-
-    def _prof_record(self, age_ms, decode_ms, infer_ms, e2e_ms, per_model_ms) -> None:
-        self._prof_n += 1
-        for k, v in (
-            ("age_ms", age_ms),
-            ("decode_ms", decode_ms),
-            ("infer_ms", infer_ms),
-            ("e2e_ms", e2e_ms),
-        ):
-            self._prof_sum[k] += v
-            if v > self._prof_max[k]:
-                self._prof_max[k] = v
-        for name, v in per_model_ms.items():
-            self._prof_model_sum[name] = self._prof_model_sum.get(name, 0.0) + v
-        if self._prof_n < self._prof_every:
-            return
-        n = self._prof_n
-        m = {k: self._prof_sum[k] / n for k in self._prof_sum}
-        x = self._prof_max
-        models_str = " ".join(
-            f"{name} {self._prof_model_sum[name] / n:.1f}"
-            for name in self._prof_model_sum
-        )
-        self.get_logger().info(
-            f"[prof] n={n} age {m['age_ms']:.0f}/{x['age_ms']:.0f} | "
-            f"decode {m['decode_ms']:.1f}/{x['decode_ms']:.1f} | "
-            f"infer {m['infer_ms']:.1f}/{x['infer_ms']:.1f} ({models_str}) "
-            f"=> e2e {m['e2e_ms']:.0f}/{x['e2e_ms']:.0f} ms (mean/max)"
-        )
-        self._prof_reset()
+            self._cam_stats.add(age_ms=age_ms, decode_ms=decode_ms)
+            if self._cam_stats.n >= self._prof_every:
+                self.get_logger().info(
+                    f"[prof:cam] n={self._cam_stats.n} "
+                    f"age {self._cam_stats.fmt('age_ms')} | "
+                    f"decode {self._cam_stats.fmt('decode_ms')} ms (mean/max) | "
+                    f"{self._cam_stats.hz():.1f} Hz"
+                )
+                self._cam_stats.reset()
 
 
 def main(args=None):
