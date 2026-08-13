@@ -114,7 +114,7 @@ class YoloNode(LifecycleNode):
             self.get_parameter("input_image_topic").get_parameter_value().string_value
         )
         sub_qos_profile = qos_profile_sensor_data
-        sub_qos_profile.depth = 1
+        sub_qos_profile.depth = 2
         self.image_subscriber = self.create_subscription(
             Image,
             input_image_topic,
