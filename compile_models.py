@@ -23,7 +23,7 @@ def export_model_to_engine(model_file_path: str) -> None:
         model_file_path (str): The path of the model file.
     """
     model = YOLO(model_file_path)
-    model.export(format="engine", device=0, half=True)
+    model.export(format="engine")
 
 
 def check_compiled_files_exist(pt_file_path: str) -> dict[str, bool]:
