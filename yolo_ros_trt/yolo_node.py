@@ -1,5 +1,4 @@
 import gc
-import time
 from pathlib import Path
 
 import rclpy
@@ -8,7 +7,6 @@ from cv_bridge import CvBridge
 from foxglove_msgs.msg import ImageAnnotations
 from rclpy.lifecycle import LifecycleNode, LifecycleState, TransitionCallbackReturn
 from rclpy.qos import qos_profile_sensor_data
-from rclpy.time import Time
 from sensor_msgs.msg import Image
 from ultralytics import YOLO
 from yolo_msgs.msg import DetectionArray
@@ -20,6 +18,7 @@ from yolo_ros_trt.utils.yolo_node_helper import (
 
 
 class YoloNode(LifecycleNode):
+
     def __init__(self, name="yolo_node") -> None:
         super().__init__(name)
 
@@ -37,13 +36,6 @@ class YoloNode(LifecycleNode):
         self.declare_parameter("output_annotations_topic", "yolo/annotations")
         self.declare_parameter("display_tracker_id", False)
         self.declare_parameter("font_size", 50.0)
-
-        # Latency profiling: log a windowed mean/max breakdown of the per-frame
-        # pipeline (image age, convert, inference, postprocess+publish, annotate)
-        # every `profiling_log_every` frames. Cheap (perf_counter only); set
-        # enable_profiling:=false to silence.
-        self.declare_parameter("enable_profiling", False)
-        self.declare_parameter("profiling_log_every", 30)
 
         # Check if the model file exists
         model_path = self.get_parameter("model_path").get_parameter_value().string_value
@@ -101,13 +93,7 @@ class YoloNode(LifecycleNode):
         self.model_predict = lambda image: self.model.predict(
             image, conf=conf, iou=iou, agnostic_nms=agnostic_nms
         )
-        self.get_logger().info(
-            f"[{self.get_name()}] Model predict function created with conf={conf}, iou={iou}, agnostic_nms={agnostic_nms}"
-        )
         self.class_names = self.model.names
-        self.get_logger().info(
-            f"[{self.get_name()}] Class names set up: {self.class_names}"
-        )
 
         # Create subscribers
         input_image_topic = (
@@ -119,21 +105,6 @@ class YoloNode(LifecycleNode):
             self.image_callback,
             qos_profile_sensor_data,
         )
-        self.get_logger().info(
-            f"[{self.get_name()}] Subscribed to input image topic: {input_image_topic}"
-        )
-
-        # Profiling state
-        self._profiling = (
-            self.get_parameter("enable_profiling").get_parameter_value().bool_value
-        )
-        self._prof_every = max(
-            1,
-            self.get_parameter("profiling_log_every")
-            .get_parameter_value()
-            .integer_value,
-        )
-        self._prof_reset()
 
         super().on_activate(state)
         self.get_logger().info(f"[{self.get_name()}] Activated")
@@ -176,59 +147,12 @@ class YoloNode(LifecycleNode):
         self.get_logger().info(f"[{self.get_name()}] Shutted down")
         return TransitionCallbackReturn.SUCCESS
 
-    _PROF_KEYS = (
-        "age_ms",
-        "convert_ms",
-        "infer_ms",
-        "post_pub_ms",
-        "annot_ms",
-        "e2e_ms",
-    )
-
-    def _prof_reset(self) -> None:
-        self._prof_n = 0
-        self._prof_sum = {k: 0.0 for k in self._PROF_KEYS}
-        self._prof_max = {k: 0.0 for k in self._PROF_KEYS}
-
-    def _prof_record(self, **vals: float) -> None:
-        self._prof_n += 1
-        for k, v in vals.items():
-            self._prof_sum[k] += v
-            if v > self._prof_max[k]:
-                self._prof_max[k] = v
-        if self._prof_n < self._prof_every:
-            return
-        n = self._prof_n
-        m = {k: self._prof_sum[k] / n for k in self._PROF_KEYS}
-        x = self._prof_max
-        self.get_logger().info(
-            f"[prof] n={n} "
-            f"age {m['age_ms']:.0f}/{x['age_ms']:.0f} | "
-            f"conv {m['convert_ms']:.1f}/{x['convert_ms']:.1f} | "
-            f"infer {m['infer_ms']:.1f}/{x['infer_ms']:.1f} | "
-            f"post+pub {m['post_pub_ms']:.1f}/{x['post_pub_ms']:.1f} | "
-            f"annot {m['annot_ms']:.1f}/{x['annot_ms']:.1f} "
-            f"=> e2e(stamp->det) {m['e2e_ms']:.0f}/{x['e2e_ms']:.0f} ms (mean/max)"
-        )
-        self._prof_reset()
-
     def image_callback(self, msg: Image) -> None:
-        t0 = time.perf_counter()
-        # Image age when YOLO starts: camera capture stamp -> now (transport+queue wait)
-        age_ms = (
-            self.get_clock().now() - Time.from_msg(msg.header.stamp)
-        ).nanoseconds / 1e6
-
         cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
-        t1 = time.perf_counter()
-
-        # .cpu() forces a GPU sync, so t2 reflects true inference completion.
         results = self.model_predict(cv_image)[0].cpu()
-        t2 = time.perf_counter()
 
         detections = get_detections(results, msg.header, self.class_names)
         self.detections_publisher.publish(detections)
-        t3 = time.perf_counter()
 
         # Debug annotations
         sv_detections = sv.Detections.from_ultralytics(results)
@@ -243,17 +167,6 @@ class YoloNode(LifecycleNode):
             display_tracker_id=display_tracker_id,
         )
         self.debug_annotations_publisher.publish(image_annotations)
-        t4 = time.perf_counter()
-
-        if self._profiling:
-            self._prof_record(
-                age_ms=age_ms,
-                convert_ms=(t1 - t0) * 1e3,
-                infer_ms=(t2 - t1) * 1e3,
-                post_pub_ms=(t3 - t2) * 1e3,
-                annot_ms=(t4 - t3) * 1e3,
-                e2e_ms=age_ms + (t3 - t0) * 1e3,
-            )
 
 
 def main(args=None):
