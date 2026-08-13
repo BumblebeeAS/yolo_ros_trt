@@ -264,10 +264,8 @@ class MultiYoloNode(LifecycleNode):
         self._prof_reset()
 
         # Single shared subscription -> single decode for all models.
-        sub_qos_profile = qos_profile_sensor_data
-        sub_qos_profile.depth = 2
         self.image_subscriber = self.create_subscription(
-            Image, input_image_topic, self.image_callback, qos_profile=sub_qos_profile
+            Image, input_image_topic, self.image_callback, qos_profile_sensor_data
         )
         self.get_logger().info(
             f"[{self.get_name()}] Subscribed to '{input_image_topic}' for "
