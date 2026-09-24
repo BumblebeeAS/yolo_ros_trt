@@ -18,7 +18,7 @@ For Nvidia Jetpack 6, see the [Ultralytics guide](https://docs.ultralytics.com/g
 
 ### Run
 
-Run `export.py` to export trained `.pt` models to `.engine` files. For example,
+Run `export.py` on the target Jetson to export trained `.pt` models to device-specific `.engine` files. For example,
 
 ```bash
 python export.py yolov11s_gate_20250520_0.pt
