@@ -27,7 +27,6 @@ setup(
     maintainer_email="todo@todo.com",
     description="YOLO for ROS 2 with TensorRT",
     license="todo",
-    tests_require=["pytest"],
     entry_points={
         "console_scripts": [
             "tracking_node = yolo_ros_trt.tracking_node:main",
