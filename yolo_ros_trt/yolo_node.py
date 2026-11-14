@@ -19,7 +19,10 @@ from yolo_ros_trt.utils.yolo_node_helper import (
 
 class YoloNode(LifecycleNode):
 
-    def __init__(self, name="yolo_node") -> None:
+    def __init__(
+        self, name="yolo_node", detections_topic="yolo/detections",
+        annotations_topic="yolo/annotations",
+    ) -> None:
         super().__init__(name)
 
         self.declare_parameter("model_path", "")
@@ -32,8 +35,8 @@ class YoloNode(LifecycleNode):
         self.declare_parameter("activate_on_start", False)
 
         self.declare_parameter("input_image_topic", "image")
-        self.declare_parameter("output_detections_topic", "yolo/detections")
-        self.declare_parameter("output_annotations_topic", "yolo/annotations")
+        self.declare_parameter("output_detections_topic", detections_topic)
+        self.declare_parameter("output_annotations_topic", annotations_topic)
         self.declare_parameter("display_tracker_id", False)
         self.declare_parameter("font_size", 50.0)
 
@@ -84,16 +87,11 @@ class YoloNode(LifecycleNode):
         )
 
         try:
-            self.model = YOLO(model_path, task="segment")
-        except FileNotFoundError:
-            self.get_logger().error(f"Model file '{model_path}' does not exists")
+            self.load_model(model_path, conf, iou, agnostic_nms)
+        except Exception as exc:
+            self.get_logger().error(f"Cannot load model '{model_path}': {exc}")
             return TransitionCallbackReturn.ERROR
         self.get_logger().info(f"[{self.get_name()}] Model loaded: {model_path}")
-
-        self.model_predict = lambda image: self.model.predict(
-            image, conf=conf, iou=iou, agnostic_nms=agnostic_nms
-        )
-        self.class_names = self.model.names
 
         # Create subscribers
         input_image_topic = (
@@ -147,15 +145,25 @@ class YoloNode(LifecycleNode):
         self.get_logger().info(f"[{self.get_name()}] Shutted down")
         return TransitionCallbackReturn.SUCCESS
 
+    def load_model(self, model_path, conf, iou, agnostic_nms):
+        self.model = YOLO(model_path, task="segment")
+        self.model_predict = lambda image: self.model.predict(
+            image, conf=conf, iou=iou, agnostic_nms=agnostic_nms
+        )
+        self.class_names = self.model.names
+
+    def predict_detections(self, cv_image, header):
+        results = self.model_predict(cv_image)[0].cpu()
+        detections = get_detections(results, header, self.class_names)
+        sv_detections = sv.Detections.from_ultralytics(results)
+        return detections, sv_detections
+
     def image_callback(self, msg: Image) -> None:
         cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
-        results = self.model_predict(cv_image)[0].cpu()
-
-        detections = get_detections(results, msg.header, self.class_names)
+        detections, sv_detections = self.predict_detections(cv_image, msg.header)
         self.detections_publisher.publish(detections)
 
         # Debug annotations
-        sv_detections = sv.Detections.from_ultralytics(results)
         font_size = self.get_parameter("font_size").get_parameter_value().double_value
         display_tracker_id = (
             self.get_parameter("display_tracker_id").get_parameter_value().bool_value

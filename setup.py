@@ -1,14 +1,14 @@
 import os
 from glob import glob
 
-from setuptools import setup
+from setuptools import find_packages, setup
 
 package_name = "yolo_ros_trt"
 
 setup(
     name=package_name,
     version="0.0.0",
-    packages=[package_name],
+    packages=find_packages(exclude=["test"]),
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
@@ -31,6 +31,8 @@ setup(
         "console_scripts": [
             "tracking_node = yolo_ros_trt.tracking_node:main",
             "yolo_node = yolo_ros_trt.yolo_node:main",
+            "classifier_node = yolo_ros_trt.classifier_node:main",
+            "rfdetr_node = yolo_ros_trt.rfdetr_node:main",
         ],
     },
 )

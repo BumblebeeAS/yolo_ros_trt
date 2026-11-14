@@ -1,0 +1,8 @@
+# Uses the container's CUDA PyTorch, ONNX and ONNX Runtime.
+rfdetr==1.11.2
+supervision>=0.29,<0.31
+onnx-graphsurgeon
+onnxsim
+onnxscript
+cuda-bindings
+polygraphy
