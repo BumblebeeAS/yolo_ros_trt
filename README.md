@@ -49,3 +49,9 @@ For object detection using YOLOv8, see [our fork of Isaac ROS Object Detection](
 - https://github.com/mgonzs13/yolo_ros
 - https://design.ros2.org/articles/node_lifecycle.html
 - https://foxglove.dev/blog/how-to-use-ros2-lifecycle-nodes
+
+## RF-DETR and ROI classification
+
+Install `requirements-rfdetr.txt` using the existing CUDA PyTorch environment. `rfdetr_node` reuses the YOLO lifecycle and ROS detection format; checkpoint metadata supplies class order and background removal. `classifier_node` pairs detections with their original image stamps and reads class names and crop preprocessing from the exported model contract.
+
+Use `export_rfdetr.py` for detector engines and `export_buoy_classifier.py` for classifier engines. Keep each engine’s generated `.json` beside it. TensorRT engines must be built on the target GPU; the classifier requires its contract’s exact image dimensions.

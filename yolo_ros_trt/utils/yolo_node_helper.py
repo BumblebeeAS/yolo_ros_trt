@@ -70,11 +70,11 @@ def get_image_annotations_from_detections(
             bbox_top_left_position = bbox_top_left_positions[i]
             mask = detections.mask[i]
 
+            outline_color = hex_to_rgba(colors[class_id % len(colors)])
+            r, g, b, a = map(lambda x: x / 255.0, outline_color)
             polygons = mask_to_polygons(mask)
             for polygon in polygons:
                 points = [Point2(x=float(x), y=float(y)) for x, y in polygon]
-                outline_color = hex_to_rgba(colors[class_id % len(colors)])
-                r, g, b, a = map(lambda x: x / 255.0, outline_color)
 
                 points_annotation = PointsAnnotation(
                     timestamp=header.stamp,
@@ -103,6 +103,48 @@ def get_image_annotations_from_detections(
             image_annotations.texts.append(text_annotation)
 
     return image_annotations
+
+
+def get_image_annotations_from_detection_array(detections: DetectionArray) -> ImageAnnotations:
+    """Draw ROS detection polygons and labels without rasterizing their masks."""
+    buoy_colors = {
+        "buoy_red": "#ff0000",
+        "buoy_green": "#00ff00",
+        "buoy_blue": "#0000ff",
+        "buoy_off": "#000000",
+        "buoy_unknown": "#808080",
+        "buoy_unobservable": "#808080",
+    }
+    annotations = ImageAnnotations()
+    for detection in detections.detections:
+        color = buoy_colors.get(
+            detection.class_name, DEFAULT_COLOR_PALETTE[detection.class_id % len(DEFAULT_COLOR_PALETTE)]
+        ).lstrip("#")
+        background = Color(
+            r=int(color[0:2], 16) / 255.0,
+            g=int(color[2:4], 16) / 255.0,
+            b=int(color[4:6], 16) / 255.0, a=1.0,
+        )
+        bbox = detection.bbox
+        left = bbox.center.position.x - bbox.size.x / 2
+        top = bbox.center.position.y - bbox.size.y / 2
+        points = [Point2(x=p.x, y=p.y) for p in detection.mask.data]
+        if not points:
+            points = [
+                Point2(x=left, y=top), Point2(x=left + bbox.size.x, y=top),
+                Point2(x=left + bbox.size.x, y=top + bbox.size.y),
+                Point2(x=left, y=top + bbox.size.y),
+            ]
+        annotations.points.append(PointsAnnotation(
+            timestamp=detections.header.stamp, type=PointsAnnotation.LINE_LOOP,
+            points=points, outline_color=background, thickness=5.0,
+        ))
+        annotations.texts.append(TextAnnotation(
+            timestamp=detections.header.stamp, position=Point2(x=left, y=top),
+            text=f"{detection.class_name} {detection.score:.2f}", font_size=50.0,
+            text_color=Color(r=1.0, g=1.0, b=1.0, a=1.0), background_color=background,
+        ))
+    return annotations
 
 
 def parse_hypothesis(results: Results, class_names: dict[int, str]) -> list[dict]:
